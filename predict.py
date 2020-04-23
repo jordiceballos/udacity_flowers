@@ -10,9 +10,11 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
 import seaborn as sns
-from scipy.special import softmax
+#from scipy.special import softmax
 import argparse
 import os
+import os.path
+from os import path
 import sys
 
 # Predict flower name from an image with predict.py along with the probability of that name. 
@@ -54,32 +56,40 @@ def load_images():
 
 #---------------------------------------------------  LOAD CHECKPOINT 
 def load_checkpoint(filename):
-    print("Loading checkpoint")
-    checkpoint = torch.load(filename)
+    print(f"\nLoading checkpoint '{filename}'")
     
-    if checkpoint['model'] == 'VGG19':
-        model = models.vgg19(pretrained=True)
-        for param in model.parameters():
-            param.requires_grad = False
-            model.class_to_idx = checkpoint['class_to_idx']
-    
-            classifier = nn.Sequential(OrderedDict([
-                          ('fc1', nn.Linear(checkpoint['input_size'], 4096)),
-                          ('relu', nn.ReLU()),
-                          ('fc2', nn.Linear(4096, checkpoint['output_size'])),
-                          ('output', nn.LogSoftmax(dim=1))
-                          ]))
-    
-            model.classifier = classifier
-            model.load_state_dict(checkpoint['state_dict'])
+    if (input_gpu == True):
+        checkpoint = torch.load(filename)    
     else:
-        print("Checkpoint is not VGG19")
+        checkpoint = torch.load(filename, map_location=device)    
+    
+    print(f"Checkpoint contains a {checkpoint['model']} architecture")
+    if checkpoint['model'].upper() == 'VGG13':
+        model = models.vgg13(pretrained=True)
+    elif checkpoint['model'].upper() == 'VGG19':
+        model = models.vgg19(pretrained=True)
+    else:
+        print("Architecture not supported")
+        
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    model.class_to_idx = checkpoint['class_to_idx']
+
+    classifier = nn.Sequential(OrderedDict([
+                  ('fc1', nn.Linear(checkpoint['input_size'], 4096)),
+                  ('relu', nn.ReLU()),
+                  ('fc2', nn.Linear(4096, checkpoint['output_size'])),
+                  ('output', nn.LogSoftmax(dim=1))
+                  ]))
+
+    model.classifier = classifier
+    model.load_state_dict(checkpoint['state_dict'])
     
     print('Checkpoint loaded')
     return model
 
 #----------------------------------------------------  SHOW IMAGE 
-
 def show_image_in_tensor(image):
     fig, ax = plt.subplots()
     
@@ -132,7 +142,7 @@ def create_idx_converter(model):
 #--------------  Receives array of model indexes, and returns array with the converted indexes
 def convert_indexes(idx, model):
     np_idx = idx[0].numpy()
-    print(f"\nOriginal indexes: {np_idx}  (need to be converted)")
+    #print(f"\nOriginal indexes: {np_idx}  (need to be converted)")
     idx_converter = create_idx_converter(model)     # Create indexes converter
     
     converted_indexes = []                  
@@ -143,7 +153,6 @@ def convert_indexes(idx, model):
 
 #--------------- Receives array of indexes, and returns array with the flower names
 def get_flower_names(flower_idx):
-    cat_to_name = load_json(json_file)
     #print(f"\nFlowers dictionary: {cat_to_name}")     
     
     flower_names = []                  
@@ -157,10 +166,10 @@ def predict(image_path, model):
     image.unsqueeze_(0)                             # Convert image from ([3, 224, 224]) to ([1, 3, 224, 224])
     output = model.forward(image)                   # Forward
     probs = torch.exp(output)                       # Normalize probs between 0 and 1 
-    top_probs, top_idx = probs.topk(5)              # Take the top 5 probs
+    top_probs, top_idx = probs.topk(input_top_k)    # Take the top 5 probs
     
     top_converted_indexes = convert_indexes (top_idx, model)
-    print(f"\nTop converted indexes: {top_converted_indexes}")
+    #print(f"\nTop converted indexes: {top_converted_indexes}")
     
     top_flower_names = get_flower_names(top_converted_indexes)
     return top_probs, top_converted_indexes, top_flower_names
@@ -186,18 +195,16 @@ def imshow(image, ax=None, title=None):
 
 #--------------------------------------------------- SANITY CHECK
 def sanity_check(flower_name, top_probs, top_flower_names):
-    fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(6,7))     # 2 rows, 1 column. Flower in first position
     
-    flower_image = process_image(image_path)                    # Transform the image to a tensor
-    ax[0] = imshow(flower_image, ax[0])                         # Plot flower image
-    top_probs_array = top_probs[0].detach().numpy()             # Convert tensor to array with probs
-    ax[1] = sns.barplot(x=top_probs_array, y=top_flower_names, color=sns.color_palette()[0]);
+    print(f"\nThe flower is a {flower_name}")
 
-    plt.suptitle(flower_name)                                   # Title with the flower name
-    plt.show()
-    
+    print(f"\nPrediction results:")
+    for x in range(0, input_top_k):
+        print(f"  {top_flower_names[x]}: {top_probs[x]*100:.7f} %")
+        
+   
 #--------------------------------------------------- MAIN 
-    
+   
 my_parser = argparse.ArgumentParser(prog='Predict', description="Predict flower name from an image with predict.py along with the probability of that name. That is, you'll pass in a single image /path/to/image and return the flower name and class probability")
 
 my_parser.add_argument('Image', type=str, help='Single input image')
@@ -208,7 +215,7 @@ my_parser.add_argument('--category_names', action='store', type=str, default='ca
 my_parser.add_argument('--gpu', action='store_true', help='Use GPU for inference')
 
 args = my_parser.parse_args()               # Parse the parameters
-print(vars(args))                          # Show the parsed parameters
+#print(vars(args))                          # Show the parsed parameters
 
 input_image = args.Image
 input_checkpoint = args.Checkpoint
@@ -216,24 +223,35 @@ input_top_k = args.top_k
 input_category_names = args.category_names
 input_gpu = args.gpu
 
+if path.exists(input_image) == False:
+    print(f"Image file does not exist.")
+    sys.exit()
+
+if path.exists(input_checkpoint) == False:
+    print(f"Checkpoint file does not exist.")
+    sys.exit()
+
+if (input_gpu == True):
+    device = torch.device("cuda")
+    print("device = cuda")
+else:
+    device = torch.device("cpu")
+    print("device = cpu")
+    
 print(f"input_image: {input_image}")
 print(f"input_checkpoint: {input_checkpoint}")
 print(f"input_top_k: {input_top_k}")
 print(f"input_category_names: {input_category_names}")
 print(f"input_gpu: {input_gpu}\n")
     
-      
-# json_file = 'cat_to_name.json'
-# cat_to_name = load_json(json_file)
+cat_to_name = load_json(input_category_names)      
+flower_num = input_image.split('/')[2]
+flower_name = cat_to_name[flower_num]   
 
-# model = load_checkpoint('flowers.pth')                                      # Load checkpoint    
+model = load_checkpoint(input_checkpoint)                                       # Load checkpoint    
 
-# image_path = 'flowers/test/10/image_07090.jpg'
-# flower_num = image_path.split('/')[2]
-# flower_name = cat_to_name[flower_num]   
+top_probs, top_labels, top_flower_names = predict(input_image, model)           # Make prediction with 1 flower
 
-# top_probs, top_labels, top_flower_names = predict(image_path, model)        # Make prediction with 1 flower
-# sanity_check (flower_name, top_probs, top_flower_names)                     # Plot flower and bar chart
-
-print('THE END')
+top_probs_array = top_probs.detach().numpy()[0]
+sanity_check (flower_name, top_probs_array, top_flower_names)                         # Plot flower and bar chart
 

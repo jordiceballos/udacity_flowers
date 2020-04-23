@@ -27,10 +27,9 @@ import sys
 
 #--------------------------------------------------- LOAD IMAGES ---------------------------------------------------
 def load_images():
-    data_dir = 'flowers'
-    train_dir = data_dir + '/train'
-    valid_dir = data_dir + '/valid'
-    test_dir  = data_dir + '/test'
+    train_dir = input_path + '/train'
+    valid_dir = input_path + '/valid'
+    test_dir  = input_path + '/test'
     
     # Define the transforms for the training, validation, and testing sets
     data_transforms = {
@@ -80,20 +79,25 @@ def load_images():
     return dataloaders, image_datasets
 
 #--------------------------------------------------- LOAD VGG19 PRETRAINED MODEL ---------------------------------------------------
-def load_vgg19_pretrained_model():
-    model = models.vgg19(pretrained=True)                           # We will use a pretrained VGG19 model
-    
-    classifier = nn.Sequential(OrderedDict([                        # New classifier that will replace the VGG19 default classifier
-                              ('fc1', nn.Linear(25088, 4096)),      #   First layer (25088 inputs, the same as default VGG19 classifier)
-                              ('relu', nn.ReLU()),                  #   ReLu activation function
-                              ('fc2', nn.Linear(4096, 102)),        #   Output layer (102 flower species)
-                              ('output', nn.LogSoftmax(dim=1))      #   Softmax loss function
-                              ]))
+def load_pretrained_model():
+    if input_arch == 'vgg13':
+        model = models.vgg13(pretrained=True)  
+    elif input_arch == 'vgg19':
+        model = models.vgg19(pretrained=True)   
+    else:
+        print(f"{input_arch} not supported")
+
+    classifier = nn.Sequential(OrderedDict([                        # New classifier that will replace the VGG13 default classifier
+        ('fc1', nn.Linear(25088, input_hidden_units)),              #   First layer (25088 inputs, the same as default VGG13 classifier)
+        ('relu', nn.ReLU()),                                        #   ReLu activation function
+        ('fc2', nn.Linear(input_hidden_units, 102)),                #   Output layer (102 flower species)
+        ('output', nn.LogSoftmax(dim=1))                            #   Softmax loss function
+    ]))
     
     for param in model.parameters():                                # Don't udpate all the pretrained weights, just the classifier
         param.requires_grad = False
     
-    model.classifier = classifier                                   # Replace default VGG19 classifier with the new one
+    model.classifier = classifier                                   # Replace default classifier with the new one
     
     model.to(device);                                               # Move model to GPU (if we have), or CPU
     return model
@@ -101,22 +105,16 @@ def load_vgg19_pretrained_model():
 #--------------------------------------------------- TRAIN THE CLASSIFIER ---------------------------------------------------
 def train(model, epochs, learning_rate, criterion, optimizer, training_loader, validation_loader):
     model.train()                                                   # Put model in training mode
-    print_every = 5
+    print_every = 50
     
     for epoch in range(epochs):                                     # In every epoch, we train with all the 6552 flower images
         num_batches = math.ceil(6552/batch_size)
         print(f"\n\nTRAINING EPOCH {epoch+1}  ({num_batches} batches of {batch_size} images)")
-        print(f'  ', end ='') 
         running_loss = 0
         count_validate = 0
-        count_batch=0   
         start = timer()
         for images, labels in iter(training_loader):                # In every iteration, we train with a batch of 64 images
             count_validate += 1
-            count_batch+=1                                          
-            print(f'{count_batch%10}', end ='')                     # Show batch number (103 batches per epoch)
-            if (count_batch%10==0): 
-                print(' ', end ='') 
 
             images = images.to(device)                              # Move images to the default device
             labels = labels.to(device)                              # Move labels to the default device
@@ -128,18 +126,12 @@ def train(model, epochs, learning_rate, criterion, optimizer, training_loader, v
             optimizer.step()                                        # Optimize weights
             running_loss += loss.item()                             # Calculate accumulated error
 
-            if count_validate % print_every == 0:                   # AVOID VALIDATION TO GENERATE A LOCAL CHECKPOINT QUICK
-                return
-            
             if count_validate % print_every == 0:                   # Every x training steps, we make 1 validation
-                print(f'V', end ='')  
                 validation_loss, accuracy = validate(model, criterion, validation_loader)
-
                 end = timer()
 
-                print(f"\n  Training loss: {running_loss/print_every:.3f}  Validation loss: {validation_loss:.3f} " +
+                print(f"  Training loss: {running_loss/print_every:.3f}  Validation loss: {validation_loss:.3f} " +
                       f" Validation accuracy: {accuracy:.3f}  Time: {end-start:.2f} sec ")
-                print(f'  ', end ='') 
                 running_loss = 0
                 start = timer()
                 
@@ -190,9 +182,9 @@ def test(model, criterion, test_loader):
  
 #---------------------------------------------------  SAVE CHECKPOINT ---------------------------------------------------
 def save_checkpoint(model, image_datasets, filename):
-    print("Save checkpoint")
+    print(f"Saving checkpoint with architecture {input_arch}")
     model.class_to_idx = image_datasets['training'].class_to_idx
-    checkpoint = {'model' : 'VGG19',
+    checkpoint = {'model' : input_arch,
                   'input_size': 25088,
                   'output_size': 102,
                   'class_to_idx': model.class_to_idx,
@@ -209,11 +201,11 @@ def save_checkpoint(model, image_datasets, filename):
 my_parser = argparse.ArgumentParser(prog='Train', description='Train a new network on a dataset and save the model as a checkpoint. Prints out training loss, validation loss, and validation accuracy as the network trains.')
 
 my_parser.add_argument('Path', metavar='data_directory', type=str, help='Directory with input files')
-my_parser.add_argument('--save_dir', action='store', type=str, default='.', help='Set directory to save checkpoints')
-my_parser.add_argument('--arch', action='store', type=str, default='VGG19', help='Choose architecture')
+my_parser.add_argument('--save_dir', action='store', type=str, default='checkpoints', help='Set directory to save checkpoints')
+my_parser.add_argument('--arch', action='store',  choices=['vgg13', 'vgg19'], type=str, default='vgg19', help='Choose architecture')
 my_parser.add_argument('--learning_rate', action='store', type=float, default='0.001', help='Set learning rate')
-my_parser.add_argument('--hidden_units', action='store', type=int, default='512', help='Set hidden units')
-my_parser.add_argument('--epochs', action='store', type=int, default='3', help='Set epochs')
+my_parser.add_argument('--hidden_units', action='store', type=int, default='4096', help='Set hidden units')
+my_parser.add_argument('--epochs', action='store', type=int, default='1', help='Set epochs')
 my_parser.add_argument('--gpu', action='store_true', help='Use GPU for training')
 
 args = my_parser.parse_args()               # Parse the parameters
@@ -227,6 +219,13 @@ input_hidden_units = args.hidden_units
 input_epochs = args.epochs
 input_gpu = args.gpu
 
+if (input_gpu == True):
+    device = torch.device("cuda")
+    print("device = cuda")
+else:
+    device = torch.device("cpu")
+    print("device = cpu")
+
 print(f"Input_path: {input_path}")
 print(f"input_savedir: {input_savedir}")
 print(f"input_arch: {input_arch}")
@@ -236,27 +235,22 @@ print(f"input_epochs: {input_epochs}")
 print(f"input_gpu: {input_gpu}\n")
 
 if not os.path.isdir(input_path):
-    print('The specified input path oes not exist')
+    print('The specified input path does not exist')
     sys.exit()
 
-if torch.cuda.is_available():                                           # Use GPU if it's available (100x faster)
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
+checkpoint_file = input_savedir + '/' + input_arch + ".pth"
+#print(checkpoint_file)
 
 batch_size = 64
-# dataloaders, image_datasets = load_images()
-# model = load_vgg19_pretrained_model()
+dataloaders, image_datasets = load_images()
+model = load_pretrained_model()
 
-# epochs = 1
-# learning_rate = 0.001
-# criterion = nn.NLLLoss()
-# optimizer = optim.Adam(model.classifier.parameters(), lr=learning_rate)
-#train(model, epochs, learning_rate, criterion, optimizer, dataloaders['training'], dataloaders['validate'])     
-#test(model, criterion, dataloaders['testing'])
+criterion = nn.NLLLoss()
+optimizer = optim.Adam(model.classifier.parameters(), lr=input_learning_rate)
+train(model, input_epochs, input_learning_rate, criterion, optimizer, dataloaders['training'], dataloaders['validate'])     
+test(model, criterion, dataloaders['testing'])
 
-#filename = 'flowers.pth'
-#save_checkpoint(model, image_datasets, filename)
+save_checkpoint(model, image_datasets, checkpoint_file)
 
-print('THE END')
+
          

@@ -67,6 +67,7 @@ def load_images():
 
 #--------------------------------------------------- LOAD VGG19 PRETRAINED MODEL ---------------------------------------------------
 def load_vgg19_pretrained_model():
+#    print("VGG-19")
     model = models.vgg19(pretrained=True)                           # We will use a pretrained VGG19 model
     
     classifier = nn.Sequential(OrderedDict([                        # New classifier that will replace the VGG19 default classifier
@@ -200,7 +201,7 @@ learning_rate = 0.001
 criterion = nn.NLLLoss()
 optimizer = optim.Adam(model.classifier.parameters(), lr=learning_rate)
 train(model, epochs, learning_rate, criterion, optimizer, dataloaders['training'], dataloaders['validate'])     
-#test(model, criterion, dataloaders['testing'])
+test(model, criterion, dataloaders['testing'])
 
 filename = 'flowers.pth'
 save_checkpoint(model, image_datasets, filename)
