@@ -191,7 +191,7 @@ else:
 images_dir = 'flowers'
 test_dir  = images_dir + '/test'
 json_file = 'cat_to_name.json'
-checkpoint_file = 'flowers.pth'
+checkpoint_file = 'checkpoints/flowers.pth'
 image_file  = test_dir + '/10/image_07090.jpg'
 print(image_file)
 
